@@ -1,80 +1,81 @@
 import os
-import sys
 import subprocess
-import json
-from openai import OpenAI
+from google import genai
+import requests
 
-TARGET_URL = os.environ.get("TARGET_URL")
-AI_API_KEY = os.environ.get("AI_API_KEY")
+# التحقق من وجود الرابط المستهدف
+target_url = os.getenv("TARGET_URL")
+if not target_url:
+    print("[-] Error: TARGET_URL is not set.")
+    exit(1)
 
-client = OpenAI(api_key=AI_API_KEY)
+print(f"[*] Starting advanced security scan on: {target_url}")
 
-def run_security_tools(url):
-    print(f"[*] Starting advanced security scan on: {url}")
-    scan_results = ""
+# تشغيل أداة Nuclei
+print("[*] Running Nuclei Scanner...")
+nuclei_output = ""
+try:
+    nuclei_cmd = f"nuclei -u {target_url} -silent"
+    nuclei_output = subprocess.check_output(nuclei_cmd, shell=True, text=True, timeout=300)
+except Exception as e:
+    nuclei_output = f"Nuclei completed or encountered: {str(e)}"
 
-    # 1. تشغيل أداة Nuclei
-    print("[*] Running Nuclei Scanner...")
-    try:
-        nuclei_cmd = ["nuclei", "-u", url, "-jsonl", "-silent", "-severity", "low,medium,high,critical"]
-        result = subprocess.run(nuclei_cmd, capture_output=True, text=True, timeout=180)
-        if result.stdout:
-            scan_results += "=== NUCLEI VULNERABILITY SCAN RESULTS ===\n"
-            scan_results += result.stdout[:15000] + "\n\n"
-    except Exception as e:
-        scan_results += f"Nuclei scan error or timeout: {str(e)}\n"
+# تشغيل أداة Nikto
+print("[*] Running Nikto Web Scanner...")
+nikto_output = ""
+try:
+    nikto_cmd = f"nikto -h {target_url} -Tuning 123b -nointeractive"
+    nikto_output = subprocess.check_output(nikto_cmd, shell=True, text=True, timeout=300)
+except Exception as e:
+    nikto_output = f"Nikto completed or encountered: {str(e)}"
 
-    # 2. تشغيل أداة Nikto
-    print("[*] Running Nikto Web Scanner...")
-    try:
-        nikto_cmd = ["nikto", "-h", url, "-Tuning", "1234789b", "-maxtime", "60"]
-        result = subprocess.run(nikto_cmd, capture_output=True, text=True, timeout=90)
-        if result.stdout:
-            scan_results += "=== NIKTO WEB SERVER SCAN RESULTS ===\n"
-            scan_results += result.stdout[:5000] + "\n"
-    except Exception as e:
-        scan_results += f"Nikto scan error or timeout: {str(e)}\n"
+# دمج النتائج
+raw_data = f"=== NUCLEI RESULTS ===\n{nuclei_output}\n\n=== NIKTO RESULTS ===\n{nikto_output}"
 
-    if not scan_results.strip():
-        scan_results = "No vulnerabilities detected by standard tools or target blocked the scanner."
+# تحليل النتائج باستخدام Gemini AI
+print("[*] Sending tool outputs to AI for deep analysis and vulnerability correlation...")
+api_key = os.getenv("AI_API_KEY")
+client = genai.Client(api_key=api_key)
 
-    return scan_results
+prompt = f"""
+قم بتحليل نتائج الفحص الأمني التالية للموقع {target_url} واكتب تقريراً احترافياً بالثغرات والحلول المقترحة:
 
-def analyze_with_ai(raw_scan_data, url):
-    print("[*] Sending tool outputs to AI for deep analysis and vulnerability correlation...")
+{raw_data}
+"""
 
-    prompt = f"""
-    You are an elite Senior Penetration Tester and Application Security Expert.
-    I have run automated security scanners (Nuclei and Nikto) against the target: {url}.
-
-    Here is the raw output from the scanners:
-    {raw_scan_data}
-
-    Your tasks:
-    1. Analyze the raw findings, eliminate false positives, and correlate them with famous vulnerability categories (such as OWASP Top 10, common CVEs, misconfigurations, or exposed sensitive files).
-    2. Structure the findings clearly by severity (Critical, High, Medium, Low).
-    3. For each real vulnerability found, explain the risk and provide a concrete, professional remediation/fix recommendation.
-    4. If no severe vulnerabilities are found, highlight the security posture and potential hardening steps.
-
-    Provide a professional Markdown security report.
-    """
-
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2
+try:
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt,
     )
+    report = response.text
+except Exception as e:
+    report = f"Failed to generate AI report: {str(e)}"
 
-    return response.choices[0].message.content
+print(report)
 
-if __name__ == "__main__":
-    if not TARGET_URL:
-        print("[-] Error: TARGET_URL is not set.")
-        sys.exit(1)
+# رفع التقرير كـ Issue في GitHub
+github_token = os.getenv("GITHUB_TOKEN")
+repository = os.getenv("REPOSITORY")
+issue_number = os.getenv("ISSUE_NUMBER")
 
-    raw_data = run_security_tools(TARGET_URL)
-    final_report = analyze_with_ai(raw_data, TARGET_URL)
-
-    with open("security_report.md", "w", encoding="utf-8") as f:
-        f.write(final_report)
-    print("[+] Advanced AI Security Report generated successfully!")
+if github_token and repository:
+    headers = {
+        "Authorization": f"Bearer {github_token}",
+        "Accept": "application/vnd.github+json"
+    }
+    
+    issue_data = {
+        "title": f"🔒 AI Security Scan Report for {target_url}",
+        "body": report
+    }
+    
+    # إذا تم تشغيل السكربت عبر Issue، قم بالتعليق عليه، وإلا أنشئ Issue جديد
+    if issue_number and issue_number != "None":
+        comment_url = f"https://api.github.com/repos/{repository}/issues/{issue_number}/comments"
+        requests.post(comment_url, json={"body": report}, headers=headers)
+        print("[+] Report posted as a comment on the issue.")
+    else:
+        issues_url = f"https://api.github.com/repos/{repository}/issues"
+        requests.post(issues_url, json=issue_data, headers=headers)
+        print("[+] New security report issue created successfully.")
