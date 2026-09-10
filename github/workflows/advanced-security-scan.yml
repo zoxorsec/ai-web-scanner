@@ -1,0 +1,63 @@
+name: Advanced AI Web Vulnerability Scanner
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  advanced-scan:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.body, 'http://') || contains(github.event.issue.body, 'https://')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install System Security Tools (Nuclei & Nikto)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nikto wget unzip
+
+          go_version="1.21.5"
+          wget https://golang.org/dl/go$go_version.linux-amd64.tar.gz
+          sudo tar -C /usr/local -xzf go$go_version.linux-amd64.tar.gz
+          export PATH=$PATH:/usr/local/go/bin
+
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          echo "$HOME/go/bin" >> $GITHUB_ENV
+
+      - name: Install Python Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Extract Target URL from Issue
+        id: extract_url
+        run: |
+          URL=$(grep -oE "https?://[a-zA-Z0-9./?-]+" <<< "${{ github.event.issue.body }}" | head -n 1)
+          echo "TARGET_URL=$URL" >> $GITHUB_ENV
+          echo "Target is: $URL"
+
+      - name: Run Advanced Security Scanner & AI Analysis
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          PATH: ${{ env.PATH }}:/home/runner/go/bin
+        run: |
+          python scanner.py
+
+      - name: Post Professional Report to Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('security_report.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.payload.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: "## 🚨 Advanced AI Security Assessment Report\n\n" + report
+            })
