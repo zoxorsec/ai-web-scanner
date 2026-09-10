@@ -5,8 +5,7 @@ on:
     types: [opened, edited]
 
 jobs:
-  sec-scan:
-  vulnerabilities-check:
+  security-scan:
     runs-on: ubuntu-latest
     permissions:
       issues: write
