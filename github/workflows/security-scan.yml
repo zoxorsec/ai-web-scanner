@@ -28,7 +28,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          sudo apt-get update && sudo apt-get install -y nuclei nikto
+          sudo apt-get update && sudo apt-get install -y nikto
+          GO_VERSION="1.21.6"
+          wget https://golang.org/dl/go$GO_VERSION.linux-amd64.tar.gz
+          sudo tar -C /usr/local -xzf go$GO_VERSION.linux-amd64.tar.gz
+          export PATH=$PATH:/usr/local/go/bin
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
 
       - name: Run Security Scanner
         env:
