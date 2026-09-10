@@ -3,6 +3,12 @@ name: Automated Web Security Scanner
 on:
   issues:
     types: [opened, edited]
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target URL to Scan'
+        required: true
+        default: 'https://scanme.nmap.org'
 
 jobs:
   security-scan:
@@ -28,7 +34,7 @@ jobs:
         env:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_BODY: ${{ github.event.issue.body || github.event.inputs.target_url }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           REPOSITORY: ${{ github.repository }}
         run: |
